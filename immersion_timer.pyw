@@ -24,6 +24,10 @@ import os
 import sys
 import json
 import time
+import math
+import wave
+import struct
+import tempfile
 import datetime
 import tkinter as tk
 from tkinter import font as tkfont
@@ -55,11 +59,14 @@ BREAK    = "#2ec28a"
 BREAKDIM = "#1d6e51"
 DANGER   = "#ff6b6b"
 
-# alarm-sound choices -> Windows system alias (None = silent, flash only)
+# alarm-sound choices -> synthesized tone (None = silent, flash only).
+# We generate our own tone rather than relying on Windows system sounds,
+# because the system sound scheme is often set to "No Sounds" (the events
+# have no .wav assigned), in which case PlaySound succeeds but is silent.
 ALARM_CHOICES = ["Soft", "Standard", "Silent"]
-ALARM_ALIAS = {
-    "Soft": "SystemAsterisk",
-    "Standard": "SystemExclamation",
+ALARM_TONE = {
+    "Soft": {"freq": 660.0, "amp": 0.30},
+    "Standard": {"freq": 880.0, "amp": 0.55},
     "Silent": None,
 }
 
@@ -109,9 +116,9 @@ class ImmersionTimer:
         self._tick_job = None
         self._alarm_job = None
         self._flash_job = None
-        self._sound_job = None
         self._flash_on = False
         self._flashing_taskbar = False
+        self._wav_paths = {}           # alarm choice -> generated .wav path
 
         self._build_ui()
         self.render()
@@ -462,10 +469,7 @@ class ImmersionTimer:
     # --------------------------------------------------------- alarm
     def play_alarm(self):
         self.stop_alarm()
-        # Re-trigger the sound on a timer for the alarm window. SND_LOOP is not
-        # supported with SND_ALIAS (system sounds), so looping has to be done
-        # by replaying the sound ourselves.
-        self._sound_loop()
+        self._start_sound()
 
         # raise the window so it's visible, and flash the taskbar button
         try:
@@ -479,23 +483,57 @@ class ImmersionTimer:
         self._flash()
         self._alarm_job = self.root.after(5000, self.stop_alarm)
 
-    def _play_sound_once(self):
-        alias = ALARM_ALIAS.get(self.alarm)
-        if alias and HAVE_WINSOUND:
-            try:
-                winsound.PlaySound(
-                    alias, winsound.SND_ALIAS | winsound.SND_ASYNC)
-            except RuntimeError:
-                self.root.bell()
-        elif alias is None:
-            pass  # silent (flash only)
-        else:
-            self.root.bell()
+    def _alarm_wav(self, tone):
+        """Return a path to a looping beep .wav for `tone`, generating it once.
 
-    def _sound_loop(self):
-        self._play_sound_once()
-        # system alarm sounds are ~1s; replay until stop_alarm cancels this
-        self._sound_job = self.root.after(1200, self._sound_loop)
+        The file is a short beep followed by silence; played with SND_LOOP it
+        repeats as a steady beeping alarm.
+        """
+        cached = self._wav_paths.get(self.alarm)
+        if cached and os.path.exists(cached):
+            return cached
+
+        rate = 44100
+        beep_s, gap_s, fade_s = 0.25, 0.35, 0.008
+        n_beep, n_fade = int(rate * beep_s), int(rate * fade_s)
+        n_gap = int(rate * gap_s)
+        freq, amp = tone["freq"], tone["amp"]
+
+        frames = bytearray()
+        for i in range(n_beep):
+            env = 1.0
+            if i < n_fade:
+                env = i / n_fade
+            elif i > n_beep - n_fade:
+                env = max(0.0, (n_beep - i) / n_fade)
+            sample = amp * env * math.sin(2 * math.pi * freq * i / rate)
+            frames += struct.pack("<h", int(sample * 32767))
+        frames += b"\x00\x00" * n_gap
+
+        path = os.path.join(tempfile.gettempdir(),
+                            "ImmersionTimer_%s.wav" % self.alarm)
+        with wave.open(path, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(bytes(frames))
+        self._wav_paths[self.alarm] = path
+        return path
+
+    def _start_sound(self):
+        tone = ALARM_TONE.get(self.alarm)
+        if tone is None:
+            return  # silent (flash only)
+        if not HAVE_WINSOUND:
+            self.root.bell()
+            return
+        try:
+            path = self._alarm_wav(tone)
+            winsound.PlaySound(
+                path,
+                winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_LOOP)
+        except (OSError, RuntimeError):
+            self.root.bell()
 
     def _flash(self):
         self._flash_on = not self._flash_on
@@ -509,9 +547,6 @@ class ImmersionTimer:
         if self._flash_job:
             self.root.after_cancel(self._flash_job)
             self._flash_job = None
-        if self._sound_job:
-            self.root.after_cancel(self._sound_job)
-            self._sound_job = None
         if HAVE_WINSOUND:
             try:
                 winsound.PlaySound(None, winsound.SND_PURGE)
