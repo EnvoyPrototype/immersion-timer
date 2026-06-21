@@ -1,0 +1,11 @@
+# Build artifacts
+/dist/
+/build/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+
+# App state (per-user runtime data; not source)
+state.json
