@@ -109,6 +109,7 @@ class ImmersionTimer:
         self._tick_job = None
         self._alarm_job = None
         self._flash_job = None
+        self._sound_job = None
         self._flash_on = False
         self._flashing_taskbar = False
 
@@ -461,18 +462,10 @@ class ImmersionTimer:
     # --------------------------------------------------------- alarm
     def play_alarm(self):
         self.stop_alarm()
-        alias = ALARM_ALIAS.get(self.alarm)
-        if alias and HAVE_WINSOUND:
-            try:
-                winsound.PlaySound(
-                    alias,
-                    winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_LOOP)
-            except RuntimeError:
-                self.root.bell()
-        elif alias is None:
-            pass  # silent (flash only)
-        else:
-            self.root.bell()
+        # Re-trigger the sound on a timer for the alarm window. SND_LOOP is not
+        # supported with SND_ALIAS (system sounds), so looping has to be done
+        # by replaying the sound ourselves.
+        self._sound_loop()
 
         # raise the window so it's visible, and flash the taskbar button
         try:
@@ -486,6 +479,24 @@ class ImmersionTimer:
         self._flash()
         self._alarm_job = self.root.after(5000, self.stop_alarm)
 
+    def _play_sound_once(self):
+        alias = ALARM_ALIAS.get(self.alarm)
+        if alias and HAVE_WINSOUND:
+            try:
+                winsound.PlaySound(
+                    alias, winsound.SND_ALIAS | winsound.SND_ASYNC)
+            except RuntimeError:
+                self.root.bell()
+        elif alias is None:
+            pass  # silent (flash only)
+        else:
+            self.root.bell()
+
+    def _sound_loop(self):
+        self._play_sound_once()
+        # system alarm sounds are ~1s; replay until stop_alarm cancels this
+        self._sound_job = self.root.after(1200, self._sound_loop)
+
     def _flash(self):
         self._flash_on = not self._flash_on
         self.clock_label.configure(fg=DANGER if self._flash_on else TEXT)
@@ -498,6 +509,9 @@ class ImmersionTimer:
         if self._flash_job:
             self.root.after_cancel(self._flash_job)
             self._flash_job = None
+        if self._sound_job:
+            self.root.after_cancel(self._sound_job)
+            self._sound_job = None
         if HAVE_WINSOUND:
             try:
                 winsound.PlaySound(None, winsound.SND_PURGE)
