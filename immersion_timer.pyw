@@ -180,7 +180,7 @@ class ImmersionTimer:
         self.root.title("Immersion Timer")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
-        self.root.geometry("420x612")
+        self.root.geometry("420x648")
         try:
             self.root.iconbitmap(resource_path("icon.ico"))
         except Exception:
@@ -195,7 +195,7 @@ class ImmersionTimer:
         f_link  = tkfont.Font(family="Segoe UI", size=9, underline=True)
 
         card = tk.Frame(self.root, bg=PANEL, padx=26, pady=22)
-        card.place(relx=0.5, rely=0.5, anchor="center", width=388, height=580)
+        card.place(relx=0.5, rely=0.5, anchor="center", width=388, height=616)
 
         # Top bar
         top = tk.Frame(card, bg=PANEL)
@@ -210,7 +210,8 @@ class ImmersionTimer:
             top, text="⚙", font=tkfont.Font(family="Segoe UI", size=14),
             bg=PANEL, fg=MUTED, activebackground=PANEL2, activeforeground=TEXT,
             relief="flat", bd=0, cursor="hand2", command=self.open_settings,
-            takefocus=0, width=2)
+            takefocus=1, highlightthickness=2, highlightbackground=PANEL,
+            highlightcolor=FOCUS, width=2)
         self.settings_btn.pack(side="right")
 
         # Mode label
@@ -238,13 +239,15 @@ class ImmersionTimer:
         self.focus_btn = tk.Button(
             modes, text="Focus", font=f_btn, bg=PANEL2, fg=TEXT,
             activebackground=FOCUSDIM, activeforeground=TEXT, relief="flat",
-            bd=0, cursor="hand2", pady=10, takefocus=0,
+            bd=0, cursor="hand2", pady=10, takefocus=1, highlightthickness=2,
+            highlightbackground=PANEL, highlightcolor=FOCUS,
             command=self.on_focus_click)
         self.focus_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.break_btn = tk.Button(
             modes, text="Break", font=f_btn, bg=PANEL2, fg=TEXT,
             activebackground=BREAKDIM, activeforeground=TEXT, relief="flat",
-            bd=0, cursor="hand2", pady=10, takefocus=0,
+            bd=0, cursor="hand2", pady=10, takefocus=1, highlightthickness=2,
+            highlightbackground=PANEL, highlightcolor=FOCUS,
             command=self.on_break_click)
         self.break_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
@@ -267,12 +270,15 @@ class ImmersionTimer:
         self.start_btn = tk.Button(
             ctrls, text="Start", font=f_btn, bg=TEXT, fg=BG,
             activebackground="#cdd5e0", activeforeground=BG, relief="flat",
-            bd=0, cursor="hand2", pady=9, takefocus=0, command=self.toggle_start)
+            bd=0, cursor="hand2", pady=9, takefocus=1, highlightthickness=2,
+            highlightbackground=PANEL, highlightcolor=FOCUS,
+            command=self.toggle_start)
         self.start_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.reset_btn = tk.Button(
             ctrls, text="Reset", font=f_btn, bg=PANEL2, fg=TEXT,
             activebackground=LINE, activeforeground=TEXT, relief="flat",
-            bd=0, cursor="hand2", pady=9, takefocus=0, command=self.reset)
+            bd=0, cursor="hand2", pady=9, takefocus=1, highlightthickness=2,
+            highlightbackground=PANEL, highlightcolor=FOCUS, command=self.reset)
         self.reset_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
         # Totals
@@ -286,7 +292,9 @@ class ImmersionTimer:
         self.reset_today = tk.Button(
             head, text="reset", font=f_link, bg=PANEL, fg=MUTED,
             activebackground=PANEL, activeforeground=TEXT, relief="flat",
-            bd=0, cursor="hand2", takefocus=0, command=self.reset_daily)
+            bd=0, cursor="hand2", takefocus=1, highlightthickness=2,
+            highlightbackground=PANEL, highlightcolor=FOCUS,
+            command=self.reset_daily)
         self.reset_today.pack(side="right")
 
         self.total_label = tk.Label(card, text="0m 00s", bg=PANEL, fg=FOCUS,
@@ -296,8 +304,18 @@ class ImmersionTimer:
                                       bg=PANEL, fg=MUTED, font=f_small)
         self.session_label.pack(anchor="w")
 
-        # Keyboard: space toggles start/pause
-        self.root.bind("<space>", lambda e: self.toggle_start())
+        # Keyboard shortcut hint
+        tk.Label(card, text="Space start/pause  ·  Tab move  ·  Enter select",
+                 bg=PANEL, fg=MUTED, font=f_small).pack(anchor="w",
+                                                        pady=(14, 0))
+
+        # Keyboard navigation:
+        #   Space toggles start/pause unless a button is focused (then it
+        #   activates that button, the standard behavior); Enter activates the
+        #   focused button. Start out focused on Start so it works right away.
+        self.root.bind("<space>", self._on_space)
+        self.root.bind("<Return>", self._on_return)
+        self.start_btn.focus_set()
 
     # ------------------------------------------------------------ helpers
     def duration_for(self, mode):
@@ -385,6 +403,23 @@ class ImmersionTimer:
 
     def toggle_start(self):
         self.pause() if self.running else self.start()
+
+    def _on_space(self, event):
+        # If a button has focus, let it handle Space itself (activate it);
+        # otherwise treat Space as the global start/pause shortcut.
+        if isinstance(self.root.focus_get(), tk.Button):
+            return None
+        self.toggle_start()
+        return "break"
+
+    def _on_return(self, event):
+        # Enter activates the focused button, so the keyboard alone can drive
+        # everything once you've tabbed to a control.
+        w = self.root.focus_get()
+        if isinstance(w, tk.Button):
+            w.invoke()
+            return "break"
+        return None
 
     def complete_timer(self):
         """A timer reached zero on its own."""
